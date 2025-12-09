@@ -11,3 +11,4 @@ sqlx = { version = "*", features = [
 ] }
 
 tokio = { version = "*", features = ["full"] }
+dotenvy = "*"

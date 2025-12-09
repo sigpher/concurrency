@@ -1,6 +1,6 @@
-use std::{fs, str::FromStr, time::Duration};
-
 use sqlx::{SqlitePool, error::Error, prelude::FromRow, sqlite::SqliteConnectOptions};
+use std::env;
+use std::{fs, str::FromStr, time::Duration};
 
 #[derive(Debug, FromRow)]
 struct User {
@@ -12,7 +12,11 @@ struct User {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let options = SqliteConnectOptions::from_str("fmc.sqlite")?
+    dotenvy::dotenv().unwrap();
+
+    let db = env::var("DATABASE_URL").expect("database should be set");
+
+    let options = SqliteConnectOptions::from_str(&db)?
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
