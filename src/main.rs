@@ -1,6 +1,8 @@
 use log::info;
+use regex::Regex;
 use sqlx::{SqlitePool, error::Error, prelude::FromRow, sqlite::SqliteConnectOptions};
 use std::env;
+use std::path::Path;
 use std::{fs, str::FromStr, time::Duration};
 
 #[derive(Debug, FromRow)]
@@ -14,8 +16,10 @@ struct User {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     dotenvy::dotenv().unwrap();
-    let db = env::var("DATABASE_URL").expect("database should be set");
     env_logger::init();
+
+    let db = env::var("DATABASE_URL").expect("database should be set");
+    let base_url = env::var("BASE_URL").expect("base url should be set");
 
     info!("connecting database: {}", db);
     let options = SqliteConnectOptions::from_str(&db)?
@@ -23,15 +27,36 @@ async fn main() -> Result<(), Error> {
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
         .busy_timeout(Duration::from_secs(5));
+    info!("database {} connected", db);
 
-    info!("connected: {}", db);
+    let base_url = env::var("BASE_URL").expect("base url should be set");
+    let html = get_html(&base_url).await;
+    info!("connecting url: {}", &base_url);
 
-    let pool = SqlitePool::connect_with(options).await?;
+    let re = Regex::new(r#"(?s)class="bz_listl".*?<A.*?href="(?<link>.*?)""#).unwrap();
+    let links: Vec<_> = re
+        .captures_iter(&html)
+        .map(|c| c.name("link").unwrap())
+        .collect();
+    let mut standards: Vec<Standard> = Vec::new();
 
-    let create_db_sql = fs::read_to_string("sql/create_user.sql").unwrap();
-    sqlx::query(&create_db_sql).execute(&pool).await?;
+    for link in links {
+        let html = get_html(&link.as_str()).await;
+        println!("{}", &html);
+        // standards.push(get_standard_info(&html));
+    }
 
-    batch_insert_users(&pool).await?;
+    println!("{:?}", standards);
+    // for std in standard {
+    //     println!("{}", std.title);
+    // }
+
+    // let pool = SqlitePool::connect_with(options).await?;
+
+    // let create_db_sql = fs::read_to_string("sql/create_user.sql").unwrap();
+    // sqlx::query(&create_db_sql).execute(&pool).await?;
+
+    // batch_insert_users(&pool).await?;
 
     Ok(())
 }
@@ -79,4 +104,114 @@ async fn batch_insert_users(pool: &SqlitePool) -> Result<(), Error> {
     sqlx::query("VACUUM;").execute(pool).await?;
 
     Ok(())
+}
+
+pub fn get_standard_info(html: &str) -> Standard {
+    let item_id_re = Regex::new(r"<script.*?item_id=(?<item_id>\d{3,}),").unwrap();
+    let title_re = Regex::new(r#"(?s)title2.*?<span>(?<title>.*?)<font"#).unwrap();
+    // let state_re = Regex::new(r#"(?s)<td bgcolor.*?<img src="(?<state_image>.*?)""#).unwrap();
+    let status_re = Regex::new(r#"(?s)标准状态.*?<img src="(?<status_image>.*?)""#).unwrap();
+    let published_at_re =
+        Regex::new(r#"(?s)发布日期.*?(?<published_at>\d{4}-\d{2}-\d{2})"#).unwrap();
+    let effective_at_re =
+        Regex::new(r#"(?s)实施日期.*?(?<effective_at>\d{4}-\d{2}-\d{2})"#).unwrap();
+    let issued_by_re =
+        Regex::new(r##"(?s)颁发部门.*?<td bgcolor="#FFFFFF">(?<issued_by>.*?)</td>"##).unwrap();
+
+    let item_id = item_id_re
+        .captures(html)
+        .unwrap()
+        .name("item_id")
+        .unwrap()
+        .as_str()
+        .parse::<i64>()
+        .unwrap();
+
+    let title = title_re
+        .captures(html)
+        .unwrap()
+        .name("title")
+        .unwrap()
+        .as_str()
+        .to_string();
+
+    let status = status_re
+        .captures(html)
+        .unwrap()
+        .name("status_image")
+        .unwrap()
+        .as_str();
+
+    let filename = Path::new(status).file_stem().unwrap().to_str().unwrap();
+
+    let status = match filename {
+        "bfyx" => "部分有效".to_string(),
+        "jjfz" => "即将废止".to_string(),
+        "jjss" => "即将生效".to_string(),
+        "xxyx" => "现行有效".to_string(),
+        "yjfz" => "已经废止".to_string(),
+        "wz" => "未知".to_string(),
+        _ => "".to_string(),
+    };
+
+    let published_at = published_at_re
+        .captures(html)
+        .unwrap()
+        .name("published_at")
+        .unwrap()
+        .as_str()
+        .to_string();
+
+    let effective_at = effective_at_re
+        .captures(html)
+        .unwrap()
+        .name("effective_at")
+        .unwrap()
+        .as_str()
+        .to_string();
+
+    let issued_by = issued_by_re
+        .captures(html)
+        .unwrap()
+        .name("issued_by")
+        .unwrap()
+        .as_str()
+        .to_string();
+
+    Standard {
+        item_id,
+        title,
+        status,
+        published_at,
+        effective_at,
+        issued_by,
+    }
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, sqlx::FromRow)]
+pub struct Standard {
+    pub item_id: i64,
+    pub title: String,
+    pub status: String,
+    pub published_at: String,
+    pub effective_at: String,
+    pub issued_by: String,
+}
+
+async fn get_html(url: &str) -> String {
+    let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0";
+    let client = reqwest::Client::builder()
+        .user_agent(user_agent)
+        .referer(true)
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .expect("connect website error");
+
+    let resp = client.get(url).send().await.expect("get no response");
+    if resp.status().is_success() {
+        let html = resp.text_with_charset("gb2312").await.unwrap();
+        return html;
+    } else {
+        "".into()
+    }
 }

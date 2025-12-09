@@ -14,3 +14,7 @@ tokio = { version = "*", features = ["full"] }
 dotenvy = "*"
 log = "*"
 env_logger = "*"
+reqwest = { version = "*", features = ["json"] }
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+regex = "*"
