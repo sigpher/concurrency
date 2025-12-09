@@ -12,3 +12,5 @@ sqlx = { version = "*", features = [
 
 tokio = { version = "*", features = ["full"] }
 dotenvy = "*"
+log = "*"
+env_logger = "*"

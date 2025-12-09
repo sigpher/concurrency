@@ -1,3 +1,4 @@
+use log::info;
 use sqlx::{SqlitePool, error::Error, prelude::FromRow, sqlite::SqliteConnectOptions};
 use std::env;
 use std::{fs, str::FromStr, time::Duration};
@@ -13,14 +14,18 @@ struct User {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     dotenvy::dotenv().unwrap();
-
     let db = env::var("DATABASE_URL").expect("database should be set");
+    env_logger::init();
 
+    info!("connecting database: {}", db);
     let options = SqliteConnectOptions::from_str(&db)?
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
         .busy_timeout(Duration::from_secs(5));
+
+    info!("connected: {}", db);
+
     let pool = SqlitePool::connect_with(options).await?;
 
     let create_db_sql = fs::read_to_string("sql/create_user.sql").unwrap();
