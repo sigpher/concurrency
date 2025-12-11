@@ -3,7 +3,7 @@ use regex::Regex;
 use sqlx::{SqlitePool, error::Error, prelude::FromRow, sqlite::SqliteConnectOptions};
 use std::env;
 use std::path::Path;
-use std::{fs, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 
 #[derive(Debug, FromRow)]
 struct User {
@@ -18,35 +18,32 @@ async fn main() -> Result<(), Error> {
     dotenvy::dotenv().unwrap();
     env_logger::init();
 
-    let db = env::var("DATABASE_URL").expect("database should be set");
+    // let db = env::var("DATABASE_URL").expect("database should be set");
     let base_url = env::var("BASE_URL").expect("base url should be set");
 
-    info!("connecting database: {}", db);
-    let options = SqliteConnectOptions::from_str(&db)?
-        .create_if_missing(true)
-        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
-        .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
-        .busy_timeout(Duration::from_secs(5));
-    info!("database {} connected", db);
+    // info!("connecting database: {}", db);
+    // let options = SqliteConnectOptions::from_str(&db)?
+    //     .create_if_missing(true)
+    //     .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+    //     .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+    //     .busy_timeout(Duration::from_secs(5));
+    // let pool = SqlitePool::connect_with(options).await?;
+    // info!("database {} connected", db);
 
-    let base_url = env::var("BASE_URL").expect("base url should be set");
-    let html = get_html(&base_url).await;
-    info!("connecting url: {}", &base_url);
+    // let index_html = scrape_index(&base_url).await;
+    // let links = parse_index_get_all_links(index_html).await;
 
-    let re = Regex::new(r#"(?s)class="bz_listl".*?<A.*?href="(?<link>.*?)""#).unwrap();
-    let links: Vec<_> = re
-        .captures_iter(&html)
-        .map(|c| c.name("link").unwrap())
-        .collect();
-    let mut standards: Vec<Standard> = Vec::new();
+    // let mut standards: Vec<Standard> = Vec::new();
 
-    for link in links {
-        let html = get_html(&link.as_str()).await;
-        println!("{}", &html);
-        // standards.push(get_standard_info(&html));
-    }
+    // for link in links {
+    //     // println!("{link}");
+    //     let html = scrape_detail(&link).await.unwrap();
+    //     let standard = parse_detail_get_standard(&html);
+    //     standards.push(standard);
+    // }
 
-    println!("{:?}", standards);
+    // println!("{:?}", standards);
+
     // for std in standard {
     //     println!("{}", std.title);
     // }
@@ -57,6 +54,10 @@ async fn main() -> Result<(), Error> {
     // sqlx::query(&create_db_sql).execute(&pool).await?;
 
     // batch_insert_users(&pool).await?;
+    let link = "http://down.foodmate.net/standard/sort/3/166972.html";
+    let html = scrape_detail(link).await.unwrap();
+    let standard = parse_detail_get_standard(&html);
+    println!("{:?}", standard);
 
     Ok(())
 }
@@ -106,7 +107,7 @@ async fn batch_insert_users(pool: &SqlitePool) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn get_standard_info(html: &str) -> Standard {
+pub fn parse_detail_get_standard(html: &str) -> Standard {
     let item_id_re = Regex::new(r"<script.*?item_id=(?<item_id>\d{3,}),").unwrap();
     let title_re = Regex::new(r#"(?s)title2.*?<span>(?<title>.*?)<font"#).unwrap();
     // let state_re = Regex::new(r#"(?s)<td bgcolor.*?<img src="(?<state_image>.*?)""#).unwrap();
@@ -198,7 +199,7 @@ pub struct Standard {
     pub issued_by: String,
 }
 
-async fn get_html(url: &str) -> String {
+async fn scrape_page(url: &str) -> Option<String> {
     let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0";
     let client = reqwest::Client::builder()
         .user_agent(user_agent)
@@ -210,8 +211,23 @@ async fn get_html(url: &str) -> String {
     let resp = client.get(url).send().await.expect("get no response");
     if resp.status().is_success() {
         let html = resp.text_with_charset("gb2312").await.unwrap();
-        return html;
+        return Some(html);
     } else {
-        "".into()
+        None
     }
+}
+
+async fn scrape_index(url: &str) -> Option<String> {
+    scrape_page(url).await
+}
+
+async fn scrape_detail(url: &str) -> Option<String> {
+    scrape_page(url).await
+}
+
+async fn parse_index_get_all_links(html: Option<String>) -> Vec<String> {
+    let re = Regex::new(r#"(?s)class="bz_listl".*?<A.*?href="(?<link>.*?)""#).unwrap();
+    re.captures_iter(&html.unwrap())
+        .map(|c| c.name("link").unwrap().as_str().to_string())
+        .collect()
 }
